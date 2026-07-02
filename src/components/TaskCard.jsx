@@ -1,8 +1,8 @@
-import { Flag, Calendar, Trash2, ArrowRight, ArrowLeft, AlertCircle } from 'lucide-react';
+import { Flag, Calendar, Trash2, ArrowRight, ArrowLeft, AlertCircle, Pencil } from 'lucide-react';
 
 const STATUS_ORDER = ['todo', 'in_progress', 'completed'];
 
-export default function TaskCard({ task, onDelete, onMove }) {
+export default function TaskCard({ task, onDelete, onMove, onEdit }) {
     const index = STATUS_ORDER.indexOf(task.status);
     const canMoveBack = index > 0;
     const canMoveForward = index < STATUS_ORDER.length - 1;
@@ -32,6 +32,13 @@ export default function TaskCard({ task, onDelete, onMove }) {
             )}
 
             <div className="task-card-actions">
+                <button
+                    className="task-action-btn"
+                    onClick={() => onEdit(task)}
+                    title="Edit task"
+                >
+                    <Pencil size={14} />
+                </button>
                 <button
                     className="task-action-btn"
                     disabled={!canMoveBack}

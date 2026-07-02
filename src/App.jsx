@@ -5,7 +5,7 @@ import Sidebar from './components/Sidebar';
 import Column from './components/Column';
 import AddTaskModal from './components/AddTaskModal';
 import ProgressBar from './components/ProgressBar';
-import { getTasks, createTask, updateTaskStatus, deleteTask } from './api/taskApi';
+import { getTasks, createTask, updateTask, updateTaskStatus, deleteTask } from './api/taskApi';
 import './App.css';
 
 export default function App() {
@@ -21,6 +21,7 @@ export default function App() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [showModal, setShowModal] = useState(false);
+    const [editingTask, setEditingTask] = useState(null);
     const [activeView, setActiveView] = useState('inbox');
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [offlineNotice, setOfflineNotice] = useState(null);
@@ -118,6 +119,29 @@ export default function App() {
             setTasks((prev) => [offlineTask, ...prev]);
         }
         setShowModal(false);
+    }
+
+    function handleEdit(task) {
+        setEditingTask(task);
+    }
+
+    async function handleUpdate(id, taskData) {
+        const isLocalTask = String(id).startsWith('local-');
+
+        if (isOffline || isLocalTask) {
+            setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...taskData } : t)));
+            setEditingTask(null);
+            return;
+        }
+
+        try {
+            const updated = await updateTask(id, taskData);
+            setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
+        } catch (err) {
+            setIsOffline(true);
+            setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...taskData } : t)));
+        }
+        setEditingTask(null);
     }
 
     async function handleMove(id, status) {
@@ -230,14 +254,21 @@ export default function App() {
 
                 {!loading && !error && (activeView === 'inbox' || visibleTasks.length > 0) && (
                     <div className="columns">
-                        <Column title="To Do" status="todo" tasks={todo} onDelete={handleDelete} onMove={handleMove} />
-                        <Column title="In Progress" status="in_progress" tasks={inProgress} onDelete={handleDelete} onMove={handleMove} />
-                        <Column title="Completed" status="completed" tasks={completed} onDelete={handleDelete} onMove={handleMove} />
+                        <Column title="To Do" status="todo" tasks={todo} onDelete={handleDelete} onMove={handleMove} onEdit={handleEdit} />
+                        <Column title="In Progress" status="in_progress" tasks={inProgress} onDelete={handleDelete} onMove={handleMove} onEdit={handleEdit} />
+                        <Column title="Completed" status="completed" tasks={completed} onDelete={handleDelete} onMove={handleMove} onEdit={handleEdit} />
                     </div>
                 )}
             </main>
 
-            {showModal && <AddTaskModal onClose={() => setShowModal(false)} onCreate={handleCreate} />}
+            {(showModal || editingTask) && (
+                <AddTaskModal
+                    task={editingTask}
+                    onClose={() => { setShowModal(false); setEditingTask(null); }}
+                    onCreate={handleCreate}
+                    onUpdate={handleUpdate}
+                />
+            )}
         </div>
     );
 }
