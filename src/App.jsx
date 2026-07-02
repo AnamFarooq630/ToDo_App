@@ -1,4 +1,3 @@
-const StorageKey = 'flowboard_tasks';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, CalendarCheck, CalendarClock, Menu } from 'lucide-react';
 import Sidebar from './components/Sidebar';
@@ -8,25 +7,28 @@ import ProgressBar from './components/ProgressBar';
 import { getTasks, createTask, updateTask, updateTaskStatus, deleteTask } from './api/taskApi';
 import './App.css';
 
+const LOCAL_STORAGE_KEY = 'flowboard_tasks';
+
 export default function App() {
     const [tasks, setTasks] = useState(() => {
         try {
-            const saved = localStorage.getItem(StorageKey);
-            return saved ? JSON.parse(saved) : [];
-        }
-        catch {
+            const savedTasks = localStorage.getItem(LOCAL_STORAGE_KEY);
+            return savedTasks ? JSON.parse(savedTasks) : [];
+        } catch {
             return [];
         }
     });
+
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [offlineNotice, setOfflineNotice] = useState(null);
+    const [isOffline, setIsOffline] = useState(false);
+
     const [showModal, setShowModal] = useState(false);
     const [editingTask, setEditingTask] = useState(null);
+
     const [activeView, setActiveView] = useState('inbox');
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-    const [offlineNotice, setOfflineNotice] = useState(null);
-
-    const [isOffline, setIsOffline] = useState(false);
 
     const tasksRef = useRef(tasks);
     useEffect(() => {
@@ -38,69 +40,65 @@ export default function App() {
     }, []);
 
     useEffect(() => {
-        localStorage.setItem(StorageKey, JSON.stringify(tasks));
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(tasks));
     }, [tasks]);
 
     useEffect(() => {
         if (!isOffline) return;
 
-        const retryInterval = setInterval(() => {
-            loadTasks();
+        const retryTimer = setInterval(() => {
+            loadTasks(true);
         }, 15000);
 
-        return () => clearInterval(retryInterval);
+        return () => clearInterval(retryTimer);
     }, [isOffline]);
 
-    async function loadTasks() {
+    async function loadTasks(isBackgroundRetry = false) {
         try {
-            setLoading(true);
-            const data = await getTasks();
+            if (!isBackgroundRetry) setLoading(true);
+            const serverTasks = await getTasks();
             setError(null);
 
-            const localOnlyTasks = tasksRef.current.filter((t) => String(t.id).startsWith('local-'));
+            const pendingOfflineTasks = tasksRef.current.filter((t) => String(t.id).startsWith('local-'));
 
-            if (localOnlyTasks.length > 0) {
-                const syncedTasks = [];
-                const stillPendingTasks = [];
+            if (pendingOfflineTasks.length > 0) {
+                const newlySynced = [];
+                const stillPending = [];
 
-                for (const localTask of localOnlyTasks) {
+                for (const localTask of pendingOfflineTasks) {
                     const { id, ...taskData } = localTask;
                     try {
-                        const newTask = await createTask(taskData);
-                        syncedTasks.push(newTask);
-                    } catch (syncErr) {
-                        stillPendingTasks.push(localTask);
+                        const savedTask = await createTask(taskData);
+                        newlySynced.push(savedTask);
+                    } catch {
+                        stillPending.push(localTask);
                     }
                 }
 
-                setTasks([...stillPendingTasks, ...syncedTasks, ...data]);
+                setTasks([...stillPending, ...newlySynced, ...serverTasks]);
             } else {
-                setTasks(data);
+                setTasks(serverTasks);
             }
 
             setOfflineNotice(null);
             setIsOffline(false);
-        } catch (err) {
+        } catch {
             setIsOffline(true);
-            const saved = localStorage.getItem(StorageKey);
-            if (saved) {
-                setTasks(JSON.parse(saved));
+            const savedTasks = localStorage.getItem(LOCAL_STORAGE_KEY);
+            if (savedTasks) {
+                setTasks(JSON.parse(savedTasks));
                 setOfflineNotice('Showing offline data — could not reach the server.');
             } else {
                 setError('Could not reach the server. Is the backend running?');
             }
         } finally {
-            setLoading(false);
+            if (!isBackgroundRetry) setLoading(false);
         }
     }
 
     async function handleCreate(taskData) {
         if (isOffline) {
-            const offlineTask = {
-                id: 'local-' + Date.now(),
-                status: 'todo',
-                ...taskData
-            };
+            const offlineTask = { id: 'local-' + Date.now(), status: 'todo', ...taskData };
             setTasks((prev) => [offlineTask, ...prev]);
             setShowModal(false);
             return;
@@ -109,13 +107,9 @@ export default function App() {
         try {
             const newTask = await createTask(taskData);
             setTasks((prev) => [newTask, ...prev]);
-        } catch (err) {
+        } catch {
             setIsOffline(true);
-            const offlineTask = {
-                id: 'local-' + Date.now(),
-                status: 'todo',
-                ...taskData
-            };
+            const offlineTask = { id: 'local-' + Date.now(), status: 'todo', ...taskData };
             setTasks((prev) => [offlineTask, ...prev]);
         }
         setShowModal(false);
@@ -135,9 +129,9 @@ export default function App() {
         }
 
         try {
-            const updated = await updateTask(id, taskData);
-            setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
-        } catch (err) {
+            const updatedTask = await updateTask(id, taskData);
+            setTasks((prev) => prev.map((t) => (t.id === id ? updatedTask : t)));
+        } catch {
             setIsOffline(true);
             setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...taskData } : t)));
         }
@@ -145,7 +139,6 @@ export default function App() {
     }
 
     async function handleMove(id, status) {
-
         const isLocalTask = String(id).startsWith('local-');
 
         if (isOffline || isLocalTask) {
@@ -154,9 +147,9 @@ export default function App() {
         }
 
         try {
-            const updated = await updateTaskStatus(id, status);
-            setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
-        } catch (err) {
+            const updatedTask = await updateTaskStatus(id, status);
+            setTasks((prev) => prev.map((t) => (t.id === id ? updatedTask : t)));
+        } catch {
             setIsOffline(true);
             setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, status } : t)));
         }
@@ -172,7 +165,7 @@ export default function App() {
 
         try {
             await deleteTask(id);
-        } catch (err) {
+        } catch {
             setIsOffline(true);
         } finally {
             setTasks((prev) => prev.filter((t) => t.id !== id));
@@ -199,9 +192,9 @@ export default function App() {
     const inProgress = visibleTasks.filter((t) => t.status === 'in_progress');
     const completed = visibleTasks.filter((t) => t.status === 'completed');
 
-    const percent = tasks.length === 0
+    const completionPercent = tasks.length === 0
         ? 0
-        : Math.round((tasks.filter(t => t.status === 'completed').length / tasks.length) * 100);
+        : Math.round((tasks.filter((t) => t.status === 'completed').length / tasks.length) * 100);
 
     const viewMeta = {
         inbox: { title: 'To Do List' },
@@ -229,7 +222,7 @@ export default function App() {
                 <header className="board-header">
                     <div>
                         <h1>{viewMeta.title}</h1>
-                        <ProgressBar percent={percent} />
+                        <ProgressBar percent={completionPercent} />
                     </div>
                     <button className="btn-primary" onClick={() => setShowModal(true)}>
                         <Plus size={16} /> New Task
