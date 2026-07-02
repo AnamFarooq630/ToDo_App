@@ -154,7 +154,7 @@ body {
     opacity: 1;
 }
 
-.board-status { color: var(--text-secondary); }
+.board-status { color: var(--text-secondary);  margin: 0 0 20px 0;}
 .board-status.error { color: var(--danger); }
 
 .progress-wrap { width: 320px; max-width: 100%; }
@@ -452,11 +452,6 @@ body {
     font-weight: 600;
 }
 
-/* =========================================================
-   RESPONSIVE BREAKPOINTS
-   ========================================================= */
-
-/* Tablet: 2 columns for the board */
 @media (max-width: 1024px) {
     .board { padding: 30px 28px; }
     .columns {
@@ -464,7 +459,6 @@ body {
     }
 }
 
-/* Small tablet / large phone: sidebar becomes an off-canvas drawer */
 @media (max-width: 768px) {
     .app-shell { flex-direction: column; }
 
@@ -515,7 +509,7 @@ body {
     }
 }
 
-/* Phone */
+/* ----------- Phone -----------*/
 @media (max-width: 480px) {
     .board { padding: 16px; }
     .board-header h1 { font-size: 22px; }

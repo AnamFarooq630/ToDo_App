@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+const StorageKey = 'flowboard_tasks';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, CalendarCheck, CalendarClock, Menu } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import Column from './components/Column';
@@ -8,44 +9,150 @@ import { getTasks, createTask, updateTaskStatus, deleteTask } from './api/taskAp
 import './App.css';
 
 export default function App() {
-    const [tasks, setTasks] = useState([]);
+    const [tasks, setTasks] = useState(() => {
+        try {
+            const saved = localStorage.getItem(StorageKey);
+            return saved ? JSON.parse(saved) : [];
+        }
+        catch {
+            return [];
+        }
+    });
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [showModal, setShowModal] = useState(false);
     const [activeView, setActiveView] = useState('inbox');
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    const [offlineNotice, setOfflineNotice] = useState(null);
+
+    const [isOffline, setIsOffline] = useState(false);
+
+    const tasksRef = useRef(tasks);
+    useEffect(() => {
+        tasksRef.current = tasks;
+    }, [tasks]);
 
     useEffect(() => {
         loadTasks();
     }, []);
 
+    useEffect(() => {
+        localStorage.setItem(StorageKey, JSON.stringify(tasks));
+    }, [tasks]);
+
+    useEffect(() => {
+        if (!isOffline) return;
+
+        const retryInterval = setInterval(() => {
+            loadTasks();
+        }, 15000);
+
+        return () => clearInterval(retryInterval);
+    }, [isOffline]);
+
     async function loadTasks() {
         try {
             setLoading(true);
             const data = await getTasks();
-            setTasks(data);
             setError(null);
+
+            const localOnlyTasks = tasksRef.current.filter((t) => String(t.id).startsWith('local-'));
+
+            if (localOnlyTasks.length > 0) {
+                const syncedTasks = [];
+                const stillPendingTasks = [];
+
+                for (const localTask of localOnlyTasks) {
+                    const { id, ...taskData } = localTask;
+                    try {
+                        const newTask = await createTask(taskData);
+                        syncedTasks.push(newTask);
+                    } catch (syncErr) {
+                        stillPendingTasks.push(localTask);
+                    }
+                }
+
+                setTasks([...stillPendingTasks, ...syncedTasks, ...data]);
+            } else {
+                setTasks(data);
+            }
+
+            setOfflineNotice(null);
+            setIsOffline(false);
         } catch (err) {
-            setError('Could not reach the server. Is the backend running?');
+            setIsOffline(true);
+            const saved = localStorage.getItem(StorageKey);
+            if (saved) {
+                setTasks(JSON.parse(saved));
+                setOfflineNotice('Showing offline data — could not reach the server.');
+            } else {
+                setError('Could not reach the server. Is the backend running?');
+            }
         } finally {
             setLoading(false);
         }
     }
 
     async function handleCreate(taskData) {
-        const newTask = await createTask(taskData);
-        setTasks((prev) => [newTask, ...prev]);
+        if (isOffline) {
+            const offlineTask = {
+                id: 'local-' + Date.now(),
+                status: 'todo',
+                ...taskData
+            };
+            setTasks((prev) => [offlineTask, ...prev]);
+            setShowModal(false);
+            return;
+        }
+
+        try {
+            const newTask = await createTask(taskData);
+            setTasks((prev) => [newTask, ...prev]);
+        } catch (err) {
+            setIsOffline(true);
+            const offlineTask = {
+                id: 'local-' + Date.now(),
+                status: 'todo',
+                ...taskData
+            };
+            setTasks((prev) => [offlineTask, ...prev]);
+        }
         setShowModal(false);
     }
 
     async function handleMove(id, status) {
-        const updated = await updateTaskStatus(id, status);
-        setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
+
+        const isLocalTask = String(id).startsWith('local-');
+
+        if (isOffline || isLocalTask) {
+            setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, status } : t)));
+            return;
+        }
+
+        try {
+            const updated = await updateTaskStatus(id, status);
+            setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
+        } catch (err) {
+            setIsOffline(true);
+            setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, status } : t)));
+        }
     }
 
     async function handleDelete(id) {
-        await deleteTask(id);
-        setTasks((prev) => prev.filter((t) => t.id !== id));
+        const isLocalTask = String(id).startsWith('local-');
+
+        if (isOffline || isLocalTask) {
+            setTasks((prev) => prev.filter((t) => t.id !== id));
+            return;
+        }
+
+        try {
+            await deleteTask(id);
+        } catch (err) {
+            setIsOffline(true);
+        } finally {
+            setTasks((prev) => prev.filter((t) => t.id !== id));
+        }
     }
 
     const visibleTasks = useMemo(() => {
@@ -80,7 +187,6 @@ export default function App() {
 
     return (
         <div className="app-shell">
-            {/* Mobile top bar — hidden on desktop via CSS */}
             <div className="mobile-topbar">
                 <button className="hamburger-btn" onClick={() => setMobileMenuOpen(true)} aria-label="Open menu">
                     <Menu size={22} />
@@ -108,6 +214,7 @@ export default function App() {
 
                 {loading && <p className="board-status">Loading tasks…</p>}
                 {error && <p className="board-status error">{error}</p>}
+                {offlineNotice && <p className="board-status">{offlineNotice}</p>}
 
                 {!loading && !error && activeView !== 'inbox' && visibleTasks.length === 0 && (
                     <div className="page-empty-state">
