@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, CalendarCheck, CalendarClock, Menu } from 'lucide-react';
+import { Plus, CalendarCheck, CalendarClock, Menu, Download } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import Column from './components/Column';
 import AddTaskModal from './components/AddTaskModal';
@@ -23,6 +23,7 @@ export default function App() {
     const [error, setError] = useState(null);
     const [offlineNotice, setOfflineNotice] = useState(null);
     const [isOffline, setIsOffline] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
 
     const [showModal, setShowModal] = useState(false);
     const [editingTask, setEditingTask] = useState(null);
@@ -172,6 +173,44 @@ export default function App() {
         }
     }
 
+    async function handleImportTodos() {
+        setIsImporting(true);
+        try {
+            const res = await fetch('https://dummyjson.com/todos?limit=10');
+            const data = await res.json();
+
+            const importedTasks = [];
+
+            for (const t of data.todos) {
+                const taskData = {
+                    title: t.todo,
+                    description: 'Imported from DummyJSON API',
+                    due_date: null,
+                    flagged: false,
+                    status: t.completed ? 'completed' : 'todo'
+                };
+
+                if (isOffline) {
+                    importedTasks.push({ id: 'local-' + t.id + '-' + Date.now(), ...taskData });
+                } else {
+                    try {
+                        const savedTask = await createTask(taskData);
+                        importedTasks.push(savedTask);
+                    } catch {
+                        setIsOffline(true);
+                        importedTasks.push({ id: 'local-' + t.id + '-' + Date.now(), ...taskData });
+                    }
+                }
+            }
+
+            setTasks((prev) => [...importedTasks, ...prev]);
+        } catch {
+            alert('Could not fetch todos from the API. Check your internet connection.');
+        } finally {
+            setIsImporting(false);
+        }
+    }
+
     const visibleTasks = useMemo(() => {
         if (activeView === 'inbox') return tasks;
 
@@ -224,9 +263,14 @@ export default function App() {
                         <h1>{viewMeta.title}</h1>
                         <ProgressBar percent={completionPercent} />
                     </div>
-                    <button className="btn-primary" onClick={() => setShowModal(true)}>
-                        <Plus size={16} /> New Task
-                    </button>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                        <button className="btn-secondary" onClick={handleImportTodos} disabled={isImporting}>
+                            <Download size={16} /> {isImporting ? 'Importing…' : 'Import Todos'}
+                        </button>
+                        <button className="btn-primary" onClick={() => setShowModal(true)}>
+                            <Plus size={16} /> New Task
+                        </button>
+                    </div>
                 </header>
 
                 {loading && <p className="board-status">Loading tasks…</p>}
